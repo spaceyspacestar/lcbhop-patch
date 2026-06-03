@@ -203,8 +203,8 @@ namespace lcbhop {
          */
         private void Jump( ) {
             if ( Plugin.cfg.autobhop ) {
-                //wishJump = player.playerActions.Movement.Jump.ReadValue<float>( ) > 0.0f;
-                wishJump = player.isJumping; // private var, assembly needs to be Publicized
+                wishJump = player.playerActions.Movement.Jump.ReadValue<float>( ) > 0.0f;
+                //wishJump = player.isJumping; // private var, assembly needs to be Publicized
             } else if ( !wishJump ) {
                 //wishJump = player.playerActions.Movement.SwitchItem.ReadValue<float>( ) != 0.0f;
                 wishJump = player.playerActions.Movement.SwitchItem.ReadValue<float>( ) < 0f; // Jump only if you scroll down
