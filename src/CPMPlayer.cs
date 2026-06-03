@@ -3,6 +3,8 @@
  * Modified to match https://github.com/ValveSoftware/halflife/blob/master/pm_shared/pm_shared.c
  */
 
+using System;
+//using System.Numerics;
 using System.Reflection;
 
 using GameNetcodeStuff;
@@ -29,6 +31,7 @@ namespace lcbhop {
         /* Movement stuff */
         public float maxspeed = Plugin.cfg.maxspeed;            // Max speed
         public float movespeed = Plugin.cfg.movespeed;          // Ground speed (like cl_forwardspeed etc.)
+        public float walkspeed = Plugin.cfg.walkspeed;
         public float accelerate = Plugin.cfg.accelerate;        // Ground acceleration
         public float airaccelerate = Plugin.cfg.airaccelerate;  // Air acceleration
         public float stopspeed = Plugin.cfg.stopspeed;          // Ground deceleration
@@ -46,6 +49,8 @@ namespace lcbhop {
         private GameObject compass;
         private TextMeshProUGUI speedo;
 
+        private Vector3 _lastNormal;
+
         private void Start( ) {
             _controller = player.thisController;
         }
@@ -54,9 +59,11 @@ namespace lcbhop {
             // Allow crouching while mid air
             player.fallValue = 0.0f;
             // Disables fall damage
-            player.fallValueUncapped = 0.0f;
-            // Disable stamina
-            player.sprintMeter = 1.0f;
+            if ( !Plugin.cfg.falldmg ) { player.fallValueUncapped = 0.0f; }
+            // Disable stamina drain if toggle is false
+            if ( !Plugin.cfg.staminadrain ) { player.sprintMeter = 1.0f; }
+
+            //Console.WriteLine( "fallValue: " + player.fallValue + " \tfallValueUncapped: " + player.fallValueUncapped + " \ttaking damage: " + player.takingFallDamage + " \t" + player.health );
 
             if ( ( !player.IsOwner || !player.isPlayerControlled || ( player.IsServer && !player.isHostPlayerObject ) ) && !player.isTestingPlayer ) {
                 return;
@@ -68,8 +75,11 @@ namespace lcbhop {
             // Don't patch movement on ladders
             if ( player.isClimbingLadder ) {
                 Plugin.patchMove = false;
+                velocity = Vector3.zero;
                 return;
             }
+
+            //Console.WriteLine( "injured: " + player.criticallyInjured );
 
             /* Movement, here's the important part */
             Jump( );
@@ -84,8 +94,23 @@ namespace lcbhop {
 
             // Move the controller
             Plugin.patchMove = false; // Disable the Move Patch
-            _controller.Move( velocity / 32.0f * Time.deltaTime );
-            Plugin.patchMove = true; // Reenable the Move Patch
+            
+            try {
+                _controller.Move( velocity / 32.0f * Time.deltaTime );
+            } 
+            finally {
+                Plugin.patchMove = true; // Reenable the Move Patch
+            }
+            
+
+            if (_lastNormal != Vector3.zero)
+            {
+                float backoff = Vector3.Dot(velocity, _lastNormal);
+                if (backoff < 0)
+                    velocity -= _lastNormal * backoff;
+                
+                _lastNormal = Vector3.zero;
+            }
 
             wishJump = false;
 
@@ -120,23 +145,74 @@ namespace lcbhop {
          * Sets the movement direction based on player input
          */
         private void SetMovementDir( ) {
-            _cmd.forwardMove = player.playerActions.Movement.Move.ReadValue<Vector2>( ).y * movespeed;
-            _cmd.rightMove = player.playerActions.Movement.Move.ReadValue<Vector2>( ).x * movespeed;
-        }
+            float speed = 0;
+            // Checks if player is sprinting or not and sets ground speed
+            if ( player.isSprinting ) {
+                speed = movespeed;
+            } else {
+                speed = walkspeed;
+            }
+            //Console.Out.WriteLine( "Speed: " + speed / player.carryWeight );
+            player.CalculateGroundNormal( ); // Default logic
+            // Adjust speed based on weight
+            speed /= player.carryWeight; // This variable is pre calculated somewhere using formula: 1 + (TOTALWEIGHT / 105)
 
+            // Default logic
+            if ( player.sinkingValue > 0.73f ) {
+                speed = 0f;
+            } else {
+                if ( player.isCrouching ) {
+                    speed /= 1.5f;
+                } else if ( player.criticallyInjured && !player.isCrouching ) {
+                    speed *= player.limpMultiplier;
+                }
+                if ( player.isSpeedCheating ) {
+                    speed *= 15f;
+                }
+                if ( player.movementHinderedPrev > 0 ) {
+                    speed /= 2f * player.hinderedMultiplier;
+                }
+                if ( player.drunkness > 0f ) {
+                    speed *= StartOfRound.Instance.drunknessSpeedEffect.Evaluate( player.drunkness ) / 5f + 1f;
+                }
+                if ( !player.isCrouching && player.crouchMeter > 1.2f ) {
+                    speed *= 0.5f;
+                }
+                if ( !player.isCrouching ) {
+                    float num4 = Vector3.Dot( player.playerGroundNormal, player.walkForce );
+                    if ( num4 > 0.05f ) {
+                        player.slopeModifier = Mathf.MoveTowards( player.slopeModifier, num4, ( player.slopeModifierSpeed + 0.45f ) * Time.deltaTime );
+                    } else {
+                        player.slopeModifier = Mathf.MoveTowards( player.slopeModifier, num4, player.slopeModifierSpeed / 2f * Time.deltaTime );
+                    }
+                    speed = Mathf.Max( speed * 0.8f, speed + player.slopeIntensity * player.slopeModifier );
+                }
+            }
+            if ( player.isTypingChat || ( player.jetpackControls && !player.thisController.isGrounded ) || StartOfRound.Instance.suckingPlayersOutOfShip ) {
+                player.moveInputVector = Vector2.zero;
+            }
+
+            //_cmd.forwardMove = player.playerActions.Movement.Move.ReadValue<Vector2>( ).y * speed;
+            //_cmd.rightMove = player.playerActions.Movement.Move.ReadValue<Vector2>( ).x * speed;
+            _cmd.forwardMove = player.moveInputVector.y * speed; // Reading from player Vector2 instead of unity Action
+            _cmd.rightMove = player.moveInputVector.x * speed;
+        }
+        
         /*
          * Checks for jump input
          */
         private void Jump( ) {
-            if ( Plugin.cfg.autobhop )
-                wishJump = player.playerActions.Movement.Jump.ReadValue<float>( ) > 0.0f;
-            else {
-                if ( !wishJump )
-                    wishJump = player.playerActions.Movement.SwitchItem.ReadValue<float>( ) != 0.0f;
+            if ( Plugin.cfg.autobhop ) {
+                //wishJump = player.playerActions.Movement.Jump.ReadValue<float>( ) > 0.0f;
+                wishJump = player.isJumping; // private var, assembly needs to be Publicized
+            } else if ( !wishJump ) {
+                //wishJump = player.playerActions.Movement.SwitchItem.ReadValue<float>( ) != 0.0f;
+                wishJump = player.playerActions.Movement.SwitchItem.ReadValue<float>( ) < 0f; // Jump only if you scroll down
             }
 
-            if ( !Plugin.cfg.enablebunnyhopping )
+            if ( !Plugin.cfg.enablebunnyhopping ) {
                 PreventMegaBunnyJumping( );
+            }
         }
 
         /*
@@ -198,6 +274,10 @@ namespace lcbhop {
 
             if ( wishJump ) {
                 velocity.y = 295;
+                
+                // Jump audio for server and client
+                player.PlayJumpAudio( );
+                player.PlayerJumpedServerRpc( );
 
                 // Animate player jumping, this is a bit tricky since its a private method (there's probably a better way to do this)
                 /* XXX: This messes with the animator and makes you not be able to crouch, couldnt figure it out yet!
@@ -205,7 +285,8 @@ namespace lcbhop {
                  * MethodInfo method = player.GetType( ).GetMethod( "Jump_performed", BindingFlags.NonPublic | BindingFlags.Instance );
                  * method.Invoke( player, new object[] { new InputAction.CallbackContext( ) } ); // Pass dummy callback context
                  * Plugin.patchJump = true; // Reenable jump patch
-                 */
+                 */ 
+                 
             }
         }
 
