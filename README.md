@@ -13,6 +13,31 @@ Movement code based on [quake3-movement-unity3d](https://github.com/WiggleWizard
 
 ## Changelog
 
+### 1.4.0a
+- Moved the component adding logic into postfix, which actually makes the mod work (for me anyway)
+- Ported code from Demo748's fork (ie. 1.4.0)
+
+### 1.4.0
+- **EITHER DELETE YOUR PREVIOUS CONFIG TO UPDATE OR CHANGE MOVE SPEED TO 300**
+- Added config to toggle fall damage, stamina drain
+- Added separate walking speed movevar to config
+- Added alternate commands to toggle autohop:
+  - /ahop
+  - /autohop
+- Added in vanilla movement speed behaviour while carrying items, crouching, or limping
+- Adjusted default movevar for sprinting to match vanilla speed
+- Changed scrollhopping to only accept mwheeldown inputs, mwheelup is default hotbar scrolling
+- Fixed jump and landing audio not playing
+- Fixed scrollwheel not working in terminal
+- Fixed pressing spacebar in chat queuing a jump when closed
+
+#### Known issues:
+- Opening chat interrupts movement, freezes player mid-air
+- Jump animation not used
+- Any non-overhang slopes are climbable
+- Friction/falling issue when moving downhill
+- Fall damage is a bandaid solution (not perfectly vanilla)
+
 ### 1.3.1
 - Fix bhop speed cap limiting vertical velocity.
 
